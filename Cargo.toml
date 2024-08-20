@@ -5,11 +5,11 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.86"
-blake3 = "1.5.3"
+blake3 = "1.5.4"
 clap = { version = "4.5.16", features = ["derive"] }
-flate2 = "1.0.31"
+flate2 = "1.0.32"
 indicatif = "0.17.8"
-reqwest = { version = "0.12.5", features = ["gzip", "brotli", "zstd"] }
+reqwest = { version = "0.12.7", features = ["gzip", "brotli", "zstd"] }
 serde = { version = "1.0.208", features = ["derive"] }
 tar = "0.4.41"
 tokio = { version = "1.39.3", features = ["rt-multi-thread", "macros"] }
