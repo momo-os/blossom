@@ -4,3 +4,16 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow = "1.0.86"
+blake3 = "1.5.3"
+clap = { version = "4.5.16", features = ["derive"] }
+flate2 = "1.0.31"
+indicatif = "0.17.8"
+reqwest = { version = "0.12.5", features = ["gzip", "brotli", "zstd"] }
+serde = { version = "1.0.208", features = ["derive"] }
+tar = "0.4.41"
+tokio = { version = "1.39.3", features = ["rt-multi-thread", "macros"] }
+toml_edit = { version = "0.22.20", features = ["serde"] }
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+url = { version = "2.5.2", features = ["serde"] }
