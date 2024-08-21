@@ -42,13 +42,21 @@ enum Commands {
 #[derive(Debug, Serialize, Deserialize)]
 struct Package {
     info: Info,
-    #[serde(default)]
-    dependencies: Vec<Dependency>,
+    dependencies: Option<Dependencies>,
     #[serde(default)]
     sources: Vec<Source>,
     #[serde(default)]
     directories: HashMap<String, String>,
-    // build: Vec<BuildStep>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Dependencies {
+    #[serde(default)]
+    required: Vec<String>,
+    #[serde(default)]
+    optional: Vec<String>,
+    #[serde(default)]
+    build: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -56,18 +64,6 @@ struct Info {
     name: String,
     version: String,
     description: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct BuildStep {
-    name: String,
-    command: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Dependency {
-    name: String,
-    version: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -122,10 +118,7 @@ async fn build_package() -> Result<()> {
     info!("Building package: {} v{}", info.name, info.version);
 
     for dependency in package.dependencies {
-        info!(
-            "Installing dependency: {} v{}",
-            dependency.name, dependency.version
-        );
+        // info!("Installing dependency: {dependency}");
     }
 
     let client = Client::new();
