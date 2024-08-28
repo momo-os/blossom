@@ -1,17 +1,22 @@
 use std::{
+    borrow::Cow,
     collections::HashMap,
     env::current_dir,
     fs::{self, File},
     io::Write as _,
-    path::{Path, PathBuf}, // process::Command,
+    path::{Path, PathBuf},
+    sync::LazyLock, // process::Command,
 };
 
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 use flate2::{write::GzEncoder, Compression};
 use indicatif::ProgressBar;
-use reqwest::Client;
+use regex::Regex;
+use reqwest::{Client, IntoUrl};
 use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, DisplayFromStr};
+use spdx::Expression;
 use tracing::{error, info};
 
 #[derive(Parser)]
@@ -49,6 +54,16 @@ struct Package {
     directories: HashMap<String, String>,
 }
 
+#[serde_as]
+#[derive(Debug, Serialize, Deserialize)]
+struct Info {
+    name: String,
+    version: String,
+    description: String,
+    #[serde_as(as = "DisplayFromStr")]
+    license: Expression,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct Dependencies {
     #[serde(default)]
@@ -60,17 +75,12 @@ struct Dependencies {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Info {
-    name: String,
-    version: String,
-    description: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 struct Source {
     url: String,
-    target: String,
 }
+
+static VARIABLE_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"%\{([a-zA-Z0-9_]*)\}").expect("invalid regex"));
 
 #[tokio::main]
 async fn main() {
@@ -102,6 +112,19 @@ async fn main() {
     }
 }
 
+fn replace_vars<'a>(haystack: &'a str, info: &Info) -> Result<Cow<'a, str>> {
+    let res = if let Some(captures) = VARIABLE_REGEX.captures(haystack) {
+        match &captures[1] {
+            "version" => VARIABLE_REGEX.replace_all(haystack, &info.version),
+            _ => bail!("Wrong matcher"),
+        }
+    } else {
+        Cow::Borrowed(haystack)
+    };
+
+    Ok(res)
+}
+
 async fn build_package() -> Result<()> {
     let package_path = current_dir()?.join("package.toml");
 
@@ -112,21 +135,25 @@ async fn build_package() -> Result<()> {
 
     let package: Package = toml_edit::de::from_str(&fs::read_to_string(package_path)?)?;
 
-    dbg!(&package);
+    // dbg!(&package);
 
     let info = package.info;
-    info!("Building package: {} v{}", info.name, info.version);
+    info!(
+        "Building package \"{}\" version {}",
+        &info.name, &info.version
+    );
 
-    for dependency in package.dependencies {
-        // info!("Installing dependency: {dependency}");
-    }
+    // for _dependency in package.dependencies {
+    //     // info!("Installing dependency: {dependency}");
+    // }
 
     let client = Client::new();
 
-    fs::create_dir_all("sources")?;
+    // fs::create_dir_all("sources")?;
 
     for source in package.sources {
-        // fetch_and_verify_source(&client, &source).await?;
+        let url = replace_vars(&source.url, &info)?;
+        fetch_and_verify_source(&client, url.as_ref()).await?;
     }
 
     // for step in &package.build {
@@ -145,10 +172,11 @@ async fn build_package() -> Result<()> {
     Ok(())
 }
 
-async fn fetch_and_verify_source(client: &Client, source: &Source) -> Result<()> {
-    info!("Fetching source from {}", source.url);
+async fn fetch_and_verify_source<U: IntoUrl>(client: &Client, url: U) -> Result<()> {
+    let url = url.into_url()?;
+    info!("Fetching source from {}", url);
 
-    let target_path: String = format!("sources/{}", source.target);
+    let target_path = url.path_segments().unwrap().last().unwrap();
 
     // if Path::new(&target_path).exists() && check_hash(&target_path, &source.hash)? {
     if Path::new(&target_path).exists() {
@@ -157,9 +185,9 @@ async fn fetch_and_verify_source(client: &Client, source: &Source) -> Result<()>
 
     let mut target = File::create(target_path)?;
 
-    // println!("Downloading {}...", source.name);
+    println!("Downloading \"{}\"", url);
 
-    let mut res = client.get(&source.url).send().await?;
+    let mut res = client.get(url).send().await?;
     let len = res.content_length().unwrap_or(0);
 
     let progress_bar = ProgressBar::new(len);
