@@ -3,14 +3,16 @@ use std::{
     collections::HashMap,
     env::current_dir,
     fs::{self, File},
-    io::Write as _,
+    io::{Read, Write as _},
     path::{Path, PathBuf},
     sync::LazyLock, // process::Command,
 };
 
 use anyhow::{anyhow, bail, Result};
+use bzip2::read::BzDecoder;
+use camino::Utf8Path;
 use clap::{Parser, Subcommand};
-use flate2::{write::GzEncoder, Compression};
+use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use indicatif::ProgressBar;
 use regex::Regex;
 use reqwest::{Client, Url};
@@ -18,7 +20,9 @@ use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 use sha2::{Digest, Sha256 as Sha256Hasher};
 use spdx::Expression;
+use tar::Archive;
 use tracing::{error, info};
+use xz2::read::XzDecoder;
 
 #[derive(Parser)]
 #[command(name = "blossom")]
@@ -154,7 +158,9 @@ async fn build_package() -> Result<()> {
     // fs::create_dir_all("sources")?;
 
     for source in package.sources {
-        fetch_and_verify_source(&client, &source, &info).await?;
+        let file_path = fetch_and_verify_source(&client, &source, &info).await?;
+        info!("Extracting...");
+        extract_source(&file_path)?;
     }
 
     // for step in &package.build {
@@ -173,7 +179,7 @@ async fn build_package() -> Result<()> {
     Ok(())
 }
 
-fn check_hash(path: &str, hash: &str) -> Result<bool> {
+fn check_hash<P: AsRef<Path>>(path: P, hash: &str) -> Result<bool> {
     let file = fs::read(path)?;
     let (hash_type, hash) = hash
         .split_once(':')
@@ -188,20 +194,20 @@ fn check_hash(path: &str, hash: &str) -> Result<bool> {
     Ok(hash == computed_hash)
 }
 
-async fn fetch_and_verify_source(client: &Client, source: &Source, info: &Info) -> Result<()> {
+async fn fetch_and_verify_source(client: &Client, source: &Source, info: &Info) -> Result<PathBuf> {
     let url: Url = replace_vars(&source.url, &info)?.as_ref().try_into()?;
+
+    let target_path = PathBuf::from(url.path_segments().unwrap().last().unwrap());
+
+    if Path::new(&target_path).exists() && check_hash(&target_path, &source.checksum)? {
+        return Ok(target_path);
+    }
 
     info!("Fetching source from {}", url);
 
-    let target_path = url.path_segments().unwrap().last().unwrap().to_string();
-
-    if Path::new(&target_path).exists() && check_hash(&target_path, &source.checksum)? {
-        return Ok(());
-    }
-
     let mut target = File::create(&target_path)?;
 
-    println!("Downloading \"{}\"", url);
+    info!("Downloading \"{}\"", url);
 
     let mut res = client.get(url).send().await?;
     let len = res.content_length().unwrap_or(0);
@@ -223,6 +229,48 @@ async fn fetch_and_verify_source(client: &Client, source: &Source, info: &Info) 
     }
 
     info!("Source hash verified successfully.");
+
+    Ok(target_path)
+}
+
+fn extract_source(target_path: &Path) -> Result<()> {
+    let target_path = Utf8Path::from_path(target_path).unwrap();
+
+    // let archive_path = format!("sources/{}", source.name);
+    // let archive_path = Utf8Path::new(&archive_path);
+
+    // if archive_path.join(".ok").exists() {
+    //     return Ok(());
+    // }
+
+    // if archive_path.exists() {
+    //     fs::remove_dir_all(archive_path)?;
+    // }
+
+    let target = File::open(target_path)?;
+
+    match target_path.extension().unwrap() {
+        "xz" => {
+            unpack_archive(XzDecoder::new(target))?;
+        }
+        "gz" => {
+            unpack_archive(GzDecoder::new(target))?;
+        }
+        "bz2" => {
+            unpack_archive(BzDecoder::new(target))?;
+        }
+        _ => bail!("Something went wrong extracting"),
+    }
+
+    Ok(())
+}
+
+fn unpack_archive<R: Read>(decoder: R) -> Result<()> {
+    // println!("Unpacking {name}");
+
+    let mut archive = Archive::new(decoder);
+
+    archive.unpack("sources/")?;
 
     Ok(())
 }
