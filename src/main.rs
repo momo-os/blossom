@@ -8,14 +8,15 @@ use std::{
     sync::LazyLock, // process::Command,
 };
 
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use clap::{Parser, Subcommand};
 use flate2::{write::GzEncoder, Compression};
 use indicatif::ProgressBar;
 use regex::Regex;
-use reqwest::{Client, IntoUrl};
+use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
+use sha2::{Digest, Sha256 as Sha256Hasher};
 use spdx::Expression;
 use tracing::{error, info};
 
@@ -77,6 +78,7 @@ struct Dependencies {
 #[derive(Debug, Serialize, Deserialize)]
 struct Source {
     url: String,
+    checksum: String,
 }
 
 static VARIABLE_REGEX: LazyLock<Regex> =
@@ -152,8 +154,7 @@ async fn build_package() -> Result<()> {
     // fs::create_dir_all("sources")?;
 
     for source in package.sources {
-        let url = replace_vars(&source.url, &info)?;
-        fetch_and_verify_source(&client, url.as_ref()).await?;
+        fetch_and_verify_source(&client, &source, &info).await?;
     }
 
     // for step in &package.build {
@@ -172,18 +173,33 @@ async fn build_package() -> Result<()> {
     Ok(())
 }
 
-async fn fetch_and_verify_source<U: IntoUrl>(client: &Client, url: U) -> Result<()> {
-    let url = url.into_url()?;
+fn check_hash(path: &str, hash: &str) -> Result<bool> {
+    let file = fs::read(path)?;
+    let (hash_type, hash) = hash
+        .split_once(':')
+        .ok_or(anyhow!("Invalid checksum format"))?;
+
+    let computed_hash = match hash_type {
+        "blake3" => blake3::hash(&file).to_hex().to_string(),
+        "sha256" => base16ct::lower::encode_string(Sha256Hasher::digest(&file).as_slice()),
+        _ => bail!("Unsupported hash"),
+    };
+
+    Ok(hash == computed_hash)
+}
+
+async fn fetch_and_verify_source(client: &Client, source: &Source, info: &Info) -> Result<()> {
+    let url: Url = replace_vars(&source.url, &info)?.as_ref().try_into()?;
+
     info!("Fetching source from {}", url);
 
-    let target_path = url.path_segments().unwrap().last().unwrap();
+    let target_path = url.path_segments().unwrap().last().unwrap().to_string();
 
-    // if Path::new(&target_path).exists() && check_hash(&target_path, &source.hash)? {
-    if Path::new(&target_path).exists() {
+    if Path::new(&target_path).exists() && check_hash(&target_path, &source.checksum)? {
         return Ok(());
     }
 
-    let mut target = File::create(target_path)?;
+    let mut target = File::create(&target_path)?;
 
     println!("Downloading \"{}\"", url);
 
@@ -201,6 +217,11 @@ async fn fetch_and_verify_source<U: IntoUrl>(client: &Client, url: U) -> Result<
 
     info!("Source fetched successfully.");
     info!("Verifying source hash.");
+
+    if !check_hash(&target_path, &source.checksum)? {
+        bail!("Hash didn't match!")
+    }
+
     info!("Source hash verified successfully.");
 
     Ok(())
