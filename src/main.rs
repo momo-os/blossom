@@ -5,7 +5,8 @@ use std::{
     fs::{self, File},
     io::{Read, Write as _},
     path::{Path, PathBuf},
-    sync::LazyLock, // process::Command,
+    process::Command,
+    sync::LazyLock,
 };
 
 use anyhow::{anyhow, bail, Result};
@@ -56,7 +57,19 @@ struct Package {
     #[serde(default)]
     sources: Vec<Source>,
     #[serde(default)]
+    steps: Vec<Step>,
+    #[serde(default)]
     directories: HashMap<String, String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Dependencies {
+    #[serde(default)]
+    required: Vec<String>,
+    #[serde(default)]
+    optional: Vec<String>,
+    #[serde(default)]
+    build: Vec<String>,
 }
 
 #[serde_as]
@@ -70,19 +83,16 @@ struct Info {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Dependencies {
-    #[serde(default)]
-    required: Vec<String>,
-    #[serde(default)]
-    optional: Vec<String>,
-    #[serde(default)]
-    build: Vec<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 struct Source {
     url: String,
     checksum: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Step {
+    name: String,
+    runner: String,
+    command: String,
 }
 
 static VARIABLE_REGEX: LazyLock<Regex> =
@@ -135,8 +145,7 @@ async fn build_package() -> Result<()> {
     let package_path = current_dir()?.join("package.toml");
 
     if !package_path.exists() {
-        error!("package.toml not found in the specified path.");
-        bail!("package.toml not found")
+        bail!("package.toml not found in the specified path.");
     }
 
     let package: Package = toml_edit::de::from_str(&fs::read_to_string(package_path)?)?;
@@ -159,19 +168,17 @@ async fn build_package() -> Result<()> {
 
     for source in package.sources {
         let file_path = fetch_and_verify_source(&client, &source, &info).await?;
-        info!("Extracting...");
         extract_source(&file_path)?;
     }
 
-    // for step in &package.build {
-    //     info!("Running build step: {}", step.name);
-    //     let result = Command::new("sh").arg("-c").arg(&step.command).status()?;
+    for step in package.steps {
+        info!("Running step: {}", step.name);
+        let result = Command::new("sh").arg("-c").arg(&step.command).status()?;
 
-    //     if !result.success() {
-    //         error!("Build step '{}' failed.", step.name);
-    //         bail!("Build step failed");
-    //     }
-    // }
+        if !result.success() {
+            bail!("Step '{}' failed.", step.name);
+        }
+    }
 
     // create_tarball(path, &package)?;
 
@@ -236,6 +243,8 @@ async fn fetch_and_verify_source(client: &Client, source: &Source, info: &Info) 
 fn extract_source(target_path: &Path) -> Result<()> {
     let target_path = Utf8Path::from_path(target_path).unwrap();
 
+    info!("Extracting \"{target_path}\"");
+
     // let archive_path = format!("sources/{}", source.name);
     // let archive_path = Utf8Path::new(&archive_path);
 
@@ -261,6 +270,8 @@ fn extract_source(target_path: &Path) -> Result<()> {
         }
         _ => bail!("Something went wrong extracting"),
     }
+
+    info!("Archive extracted successfully");
 
     Ok(())
 }
