@@ -18,7 +18,7 @@ use xz2::read::XzDecoder;
 
 use crate::{
     check_hash,
-    package::{Info, Package, Source},
+    package::{Info, Package, Source, StepVariant},
     replace_vars,
 };
 
@@ -45,19 +45,37 @@ pub async fn build() -> Result<()> {
 
     let client = Client::new();
 
-    fs::remove_dir_all("sources")?;
+    if fs::metadata("sources").is_ok() {
+        fs::remove_dir_all("sources")?;
+    }
 
     for source in package.sources {
         let file_path = fetch_and_verify_source(&client, &source, &info).await?;
         extract_source(&file_path)?;
     }
 
+    let mut working_dir = current_dir()?;
+
     for step in package.steps {
         info!("Running step: {}", step.name);
-        let result = Command::new("sh").arg("-c").arg(&step.command).status()?;
 
-        if !result.success() {
-            bail!("Step '{}' failed.", step.name);
+        match step.variant {
+            StepVariant::Command { command, .. } => {
+                let result = Command::new("sh")
+                    .arg("-c")
+                    .arg(command)
+                    .current_dir(&working_dir)
+                    .status()?;
+
+                if !result.success() {
+                    bail!("Step '{}' failed.", step.name);
+                }
+            }
+            StepVariant::Move { path } => {
+                fs::create_dir_all(&path)?;
+
+                working_dir = path
+            }
         }
     }
 

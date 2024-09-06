@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
@@ -45,6 +45,13 @@ pub struct Source {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Step {
     pub name: String,
-    pub runner: String,
-    pub command: String,
+    #[serde(flatten)]
+    pub variant: StepVariant,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum StepVariant {
+    Command { runner: String, command: String },
+    Move { path: PathBuf },
 }
