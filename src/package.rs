@@ -1,5 +1,6 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, fmt::Display, path::PathBuf, process::Command, str::FromStr};
 
+use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 use spdx::Expression;
@@ -49,9 +50,55 @@ pub struct Step {
     pub variant: StepVariant,
 }
 
+#[serde_as]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum StepVariant {
-    Command { runner: String, command: String },
-    Move { path: PathBuf },
+    Command {
+        #[serde_as(as = "DisplayFromStr")]
+        runner: Runner,
+        command: String,
+    },
+    Move {
+        path: PathBuf,
+    },
+}
+
+#[derive(Debug)]
+pub enum Runner {
+    Shell,
+}
+
+impl Display for Runner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Shell => write!(f, "shell"),
+        }
+    }
+}
+
+impl FromStr for Runner {
+    // FIXME: use an actual error
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "shell" => Ok(Self::Shell),
+            _ => Err(anyhow!("Unknown runner")),
+        }
+    }
+}
+
+impl Runner {
+    pub fn into_command(&self) -> Command {
+        match self {
+            Self::Shell => {
+                let mut command = Command::new("/bin/sh");
+
+                command.arg("-c");
+
+                command
+            }
+        }
+    }
 }

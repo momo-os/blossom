@@ -60,9 +60,9 @@ pub async fn build() -> Result<()> {
         info!("Running step: {}", step.name);
 
         match step.variant {
-            StepVariant::Command { command, .. } => {
-                let result = Command::new("sh")
-                    .arg("-c")
+            StepVariant::Command { command, runner } => {
+                let result = runner
+                    .into_command()
                     .arg(command)
                     .current_dir(&working_dir)
                     .status()?;
