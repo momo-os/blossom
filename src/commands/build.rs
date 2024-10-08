@@ -3,7 +3,6 @@ use std::{
     fs::{self, File},
     io::{Read, Write as _},
     path::{Path, PathBuf},
-    process::Command,
 };
 
 use anyhow::{bail, Result};
