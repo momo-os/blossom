@@ -85,7 +85,7 @@ pub async fn build() -> Result<()> {
 }
 
 async fn fetch_and_verify_source(client: &Client, source: &Source, info: &Info) -> Result<PathBuf> {
-    let url: Url = replace_vars(&source.url, &info)?.as_ref().try_into()?;
+    let url: Url = replace_vars(&source.url, info)?.as_ref().try_into()?;
 
     let target_path = PathBuf::from(url.path_segments().unwrap().last().unwrap());
 
